@@ -12,14 +12,13 @@ st.set_page_config(
 )
 
 st.title("Job Scheduling using Genetic Programming")
-st.write("Genetic Programming to evolve scheduling rules using uploaded CSV data")
+st.write("Genetic Programming for Job × Machine Scheduling using CSV upload")
 
 # -------------------------------------------------
 # SIDEBAR PARAMETERS
 # -------------------------------------------------
 st.sidebar.header("Simulation Parameters")
 
-NUM_MACHINES = st.sidebar.slider("Number of Machines", 1, 3, 2)
 POP_SIZE = st.sidebar.slider("Population Size", 20, 200, 50)
 GENERATIONS = st.sidebar.slider("Generations", 10, 100, 30)
 MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.2)
@@ -27,143 +26,139 @@ MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.2)
 # -------------------------------------------------
 # CSV UPLOAD
 # -------------------------------------------------
-st.subheader("Upload Job Dataset (CSV)")
+st.subheader("Upload Job × Machine CSV")
 uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
 if uploaded_file is None:
-    st.info("Please upload a CSV file to start the simulation.")
+    st.info("Please upload a Job × Machine CSV file.")
     st.stop()
 
-jobs_df = pd.read_csv(uploaded_file)
+df = pd.read_csv(uploaded_file)
 
-required_cols = {"job_id", "processing_time", "release_time"}
-if not required_cols.issubset(jobs_df.columns):
-    st.error("CSV must contain columns: job_id, processing_time, release_time")
+if "Job" not in df.columns:
+    st.error("CSV must contain 'Job' as the first column")
     st.stop()
 
-st.subheader("Uploaded Job Data")
-st.dataframe(jobs_df, use_container_width=True)
+machine_cols = df.columns[1:]
 
-jobs = jobs_df.to_dict(orient="records")
+st.subheader("Uploaded Dataset")
+st.dataframe(df, use_container_width=True)
+
+jobs = df["Job"].tolist()
+processing_matrix = df[machine_cols].values
+
+NUM_JOBS = len(jobs)
+NUM_MACHINES = len(machine_cols)
 
 # -------------------------------------------------
-# GP REPRESENTATION (RULE AS EXPRESSION STRING)
-# p = processing_time, w = waiting_time
+# GP REPRESENTATION
+# p = total processing time
+# r = remaining operations
 # -------------------------------------------------
 OPERATORS = ["+", "-", "*"]
-TERMINALS = ["p", "w", "1", "2"]
+TERMINALS = ["p", "r", "1", "2"]
 
 def random_expression(depth=2):
     if depth == 0:
         return random.choice(TERMINALS)
     return f"({random_expression(depth-1)} {random.choice(OPERATORS)} {random_expression(depth-1)})"
 
-def evaluate_expression(expr, p, w):
+def eval_expr(expr, p, r):
     try:
-        return eval(expr, {"p": p, "w": w})
+        return eval(expr, {"p": p, "r": r})
     except:
         return float("inf")
 
 # -------------------------------------------------
-# SCHEDULING SIMULATION
+# SCHEDULING SIMULATION (FLOW SHOP)
 # -------------------------------------------------
 def simulate(rule_expr):
-    time = 0
-    machines = [0] * NUM_MACHINES
-    completion_times = []
-    job_queue = jobs.copy()
+    machine_time = [0] * NUM_MACHINES
+    job_time = [0] * NUM_JOBS
+    completed = [0] * NUM_JOBS
+    remaining = [NUM_MACHINES] * NUM_JOBS
 
-    while job_queue:
-        available_jobs = [j for j in job_queue if j["release_time"] <= time]
+    total_completion = []
 
-        if not available_jobs:
-            time += 1
-            continue
+    while sum(completed) < NUM_JOBS:
+        available_jobs = [j for j in range(NUM_JOBS) if completed[j] == 0]
 
         scores = []
-        for job in available_jobs:
-            waiting = time - job["release_time"]
-            score = evaluate_expression(
-                rule_expr,
-                job["processing_time"],
-                waiting
-            )
-            scores.append((score, job))
+        for j in available_jobs:
+            total_p = sum(processing_matrix[j])
+            score = eval_expr(rule_expr, total_p, remaining[j])
+            scores.append((score, j))
 
         scores.sort(key=lambda x: x[0])
-        selected_job = scores[0][1]
+        job = scores[0][1]
 
-        m_idx = machines.index(min(machines))
-        start_time = max(time, machines[m_idx])
-        finish_time = start_time + selected_job["processing_time"]
+        for m in range(NUM_MACHINES):
+            start = max(machine_time[m], job_time[job])
+            finish = start + processing_matrix[job][m]
+            machine_time[m] = finish
+            job_time[job] = finish
+            remaining[job] -= 1
 
-        machines[m_idx] = finish_time
-        completion_times.append(finish_time)
+        completed[job] = 1
+        total_completion.append(job_time[job])
 
-        job_queue.remove(selected_job)
-        time += 1
+    makespan = max(total_completion)
+    idle_time = sum(machine_time) - makespan
 
-    makespan = max(completion_times)
-    total_completion = sum(completion_times)
-    idle_time = sum(machines) - makespan
-
-    fitness = makespan + 0.1 * total_completion + 0.1 * idle_time
+    fitness = makespan + 0.1 * idle_time
     return fitness
 
 # -------------------------------------------------
 # GENETIC OPERATORS
 # -------------------------------------------------
-def crossover(parent1, parent2):
-    cut1 = random.randint(1, len(parent1) - 2)
-    cut2 = random.randint(1, len(parent2) - 2)
-    return parent1[:cut1] + parent2[cut2:]
+def crossover(p1, p2):
+    cut1 = random.randint(1, len(p1) - 2)
+    cut2 = random.randint(1, len(p2) - 2)
+    return p1[:cut1] + p2[cut2:]
 
 def mutate(expr):
     if random.random() < MUTATION_RATE:
         return random_expression(2)
     return expr
 
-def tournament_selection(population, fitness, k=3):
-    selected = random.sample(list(zip(population, fitness)), k)
-    selected.sort(key=lambda x: x[1])
-    return selected[0][0]
+def tournament_selection(pop, fitness, k=3):
+    chosen = random.sample(list(zip(pop, fitness)), k)
+    chosen.sort(key=lambda x: x[1])
+    return chosen[0][0]
 
 # -------------------------------------------------
 # RUN GP
 # -------------------------------------------------
 if st.button("Run Genetic Programming"):
     population = [random_expression(2) for _ in range(POP_SIZE)]
-    best_fitness_history = []
+    best_history = []
     best_rule = None
 
-    for gen in range(GENERATIONS):
-        fitness_values = [simulate(ind) for ind in population]
-        best_idx = int(np.argmin(fitness_values))
+    for g in range(GENERATIONS):
+        fitness = [simulate(ind) for ind in population]
+        best_idx = int(np.argmin(fitness))
 
-        best_fitness_history.append(fitness_values[best_idx])
+        best_history.append(fitness[best_idx])
         best_rule = population[best_idx]
 
-        new_population = []
+        new_pop = []
         for _ in range(POP_SIZE):
-            p1 = tournament_selection(population, fitness_values)
-            p2 = tournament_selection(population, fitness_values)
+            p1 = tournament_selection(population, fitness)
+            p2 = tournament_selection(population, fitness)
             child = crossover(p1, p2)
             child = mutate(child)
-            new_population.append(child)
+            new_pop.append(child)
 
-        population = new_population
+        population = new_pop
 
-    # -------------------------------------------------
-    # OUTPUT
-    # -------------------------------------------------
     st.subheader("Fitness Convergence")
     st.line_chart(
-        pd.DataFrame({"Best Fitness": best_fitness_history}),
+        pd.DataFrame({"Best Fitness": best_history}),
         use_container_width=True
     )
 
-    st.subheader("Best Evolved Scheduling Rule")
+    st.subheader("Best Scheduling Rule")
     st.code(best_rule, language="text")
 
-    st.subheader("Best Fitness Value")
-    st.write(best_fitness_history[-1])
+    st.subheader("Final Makespan-based Fitness")
+    st.write(best_history[-1])
