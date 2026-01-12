@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("Job Scheduling using Genetic Programming")
-st.write("Genetic Programming for Job × Machine Scheduling using CSV upload")
+st.write("Genetic Programming for Job × Machine Scheduling (CSV Flexible Format)")
 
 # -------------------------------------------------
 # SIDEBAR PARAMETERS
@@ -30,22 +30,29 @@ st.subheader("Upload Job × Machine CSV")
 uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
 if uploaded_file is None:
-    st.info("Please upload a Job × Machine CSV file.")
+    st.info("Please upload a CSV file.")
     st.stop()
 
 df = pd.read_csv(uploaded_file)
 
-if "Job" not in df.columns:
-    st.error("CSV must contain 'Job' as the first column")
+if df.shape[1] < 2:
+    st.error("CSV must contain at least one job column and one machine column")
     st.stop()
 
+# Assume first column = Job ID, rest = machines
+job_col = df.columns[0]
 machine_cols = df.columns[1:]
+
+# Validate machine columns are numeric
+if not np.all([pd.api.types.is_numeric_dtype(df[col]) for col in machine_cols]):
+    st.error("All machine columns must contain numeric processing times")
+    st.stop()
 
 st.subheader("Uploaded Dataset")
 st.dataframe(df, use_container_width=True)
 
-jobs = df["Job"].tolist()
-processing_matrix = df[machine_cols].values
+jobs = df[job_col].astype(str).tolist()
+processing_matrix = df[machine_cols].to_numpy()
 
 NUM_JOBS = len(jobs)
 NUM_MACHINES = len(machine_cols)
@@ -78,7 +85,7 @@ def simulate(rule_expr):
     completed = [0] * NUM_JOBS
     remaining = [NUM_MACHINES] * NUM_JOBS
 
-    total_completion = []
+    completion_times = []
 
     while sum(completed) < NUM_JOBS:
         available_jobs = [j for j in range(NUM_JOBS) if completed[j] == 0]
@@ -100,9 +107,9 @@ def simulate(rule_expr):
             remaining[job] -= 1
 
         completed[job] = 1
-        total_completion.append(job_time[job])
+        completion_times.append(job_time[job])
 
-    makespan = max(total_completion)
+    makespan = max(completion_times)
     idle_time = sum(machine_time) - makespan
 
     fitness = makespan + 0.1 * idle_time
@@ -122,9 +129,9 @@ def mutate(expr):
     return expr
 
 def tournament_selection(pop, fitness, k=3):
-    chosen = random.sample(list(zip(pop, fitness)), k)
-    chosen.sort(key=lambda x: x[1])
-    return chosen[0][0]
+    candidates = random.sample(list(zip(pop, fitness)), k)
+    candidates.sort(key=lambda x: x[1])
+    return candidates[0][0]
 
 # -------------------------------------------------
 # RUN GP
@@ -135,21 +142,21 @@ if st.button("Run Genetic Programming"):
     best_rule = None
 
     for g in range(GENERATIONS):
-        fitness = [simulate(ind) for ind in population]
-        best_idx = int(np.argmin(fitness))
+        fitness_values = [simulate(ind) for ind in population]
+        best_idx = int(np.argmin(fitness_values))
 
-        best_history.append(fitness[best_idx])
+        best_history.append(fitness_values[best_idx])
         best_rule = population[best_idx]
 
-        new_pop = []
+        new_population = []
         for _ in range(POP_SIZE):
-            p1 = tournament_selection(population, fitness)
-            p2 = tournament_selection(population, fitness)
+            p1 = tournament_selection(population, fitness_values)
+            p2 = tournament_selection(population, fitness_values)
             child = crossover(p1, p2)
             child = mutate(child)
-            new_pop.append(child)
+            new_population.append(child)
 
-        population = new_pop
+        population = new_population
 
     st.subheader("Fitness Convergence")
     st.line_chart(
@@ -157,8 +164,8 @@ if st.button("Run Genetic Programming"):
         use_container_width=True
     )
 
-    st.subheader("Best Scheduling Rule")
+    st.subheader("Best Evolved Scheduling Rule")
     st.code(best_rule, language="text")
 
-    st.subheader("Final Makespan-based Fitness")
+    st.subheader("Final Fitness Value")
     st.write(best_history[-1])
