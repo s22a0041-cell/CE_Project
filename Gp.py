@@ -25,6 +25,20 @@ GENERATIONS = st.sidebar.slider("Generations", 10, 100, 30)
 CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.0, 1.0, 0.8)
 MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.2)
 
+# Tambah pilihan single-objective / multi-objective
+OBJECTIVE_TYPE = st.sidebar.radio(
+    "Objective Type",
+    options=["Single-Objective", "Multi-Objective"]
+)
+
+if OBJECTIVE_TYPE == "Multi-Objective":
+    w_makespan = st.sidebar.slider("Weight for Makespan", 0.0, 1.0, 0.5)
+    w_idle = 1 - w_makespan
+else:
+    w_makespan = 1.0
+    w_idle = 0.1  # sedia ada weighting
+
+
 # -------------------------------------------------
 # CSV UPLOAD
 # -------------------------------------------------
@@ -120,7 +134,9 @@ def simulate(rule_expr):
     makespan = max(completion_times)
     idle_time = sum(machine_time) - makespan
 
-    return makespan + 0.1 * idle_time
+    # Gabungkan untuk single atau multi-objective
+    fitness_value = w_makespan * makespan + w_idle * idle_time
+    return fitness_value
 
 # -------------------------------------------------
 # GENETIC OPERATORS
@@ -175,9 +191,9 @@ if st.button("Run Genetic Programming"):
     # -------------------------------------------------
     fig, ax = plt.subplots()
     ax.plot(range(1, GENERATIONS+1), best_history, marker='o')
-    ax.set_title("Fitness Convergence")
-    ax.set_xlabel("Generation")       # Label paksi X
-    ax.set_ylabel("Best Fitness")     # Label paksi Y
+    ax.set_title(f"Fitness Convergence ({OBJECTIVE_TYPE})")
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Best Fitness")
     ax.grid(True)
 
     st.pyplot(fig)
