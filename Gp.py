@@ -69,9 +69,18 @@ def random_expression(depth=2):
 
 def eval_rule(expr, p, r):
     try:
-        return eval(expr, {"p": p, "r": r})
+        value = eval(expr, {"p": p, "r": r})
+
+        if isinstance(value, complex):
+            return 1e9
+
+        if not np.isfinite(value):
+            return 1e9
+
+        return float(value)
+
     except:
-        return float("inf")
+        return 1e9
 
 # -------------------------------------------------
 # JOB SHOP SIMULATION
@@ -85,14 +94,16 @@ def simulate(rule_expr):
 
     while not all(completed):
         available_jobs = [j for j in range(NUM_JOBS) if not completed[j]]
-
         scores = []
+
         for j in available_jobs:
             total_p = processing[j].sum()
             score = eval_rule(rule_expr, total_p, remaining_ops[j])
             scores.append((score, j))
 
+        scores = [(s, j) for s, j in scores if np.isfinite(s)]
         scores.sort(key=lambda x: x[0])
+
         job = scores[0][1]
 
         for m in range(NUM_MACHINES):
