@@ -21,6 +21,7 @@ st.sidebar.header("Genetic Programming Parameters")
 
 POP_SIZE = st.sidebar.slider("Population Size", 20, 200, 50)
 GENERATIONS = st.sidebar.slider("Generations", 10, 100, 30)
+CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.0, 1.0, 0.8)
 MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.2)
 
 # -------------------------------------------------
@@ -35,11 +36,9 @@ if uploaded_file is None:
 
 df = pd.read_csv(uploaded_file)
 
-# FIRST COLUMN = JOB ID (Unnamed: 0)
 job_col = df.columns[0]
 machine_cols = df.columns[1:]
 
-# VALIDATION
 if not all(col.startswith("M") for col in machine_cols):
     st.error("Machine columns must be named M1, M2, ..., Mn")
     st.stop()
@@ -59,8 +58,6 @@ NUM_MACHINES = len(machine_cols)
 
 # -------------------------------------------------
 # GP REPRESENTATION
-# p = total processing time of job
-# r = remaining machines
 # -------------------------------------------------
 OPERATORS = ["+", "-", "*"]
 TERMINALS = ["p", "r", "1", "2"]
@@ -150,7 +147,12 @@ if st.button("Run Genetic Programming"):
         for _ in range(POP_SIZE):
             p1 = tournament(population, fitness)
             p2 = tournament(population, fitness)
-            child = crossover(p1, p2)
+
+            if random.random() < CROSSOVER_RATE:
+                child = crossover(p1, p2)
+            else:
+                child = p1
+
             child = mutate(child)
             new_population.append(child)
 
