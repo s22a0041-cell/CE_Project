@@ -170,12 +170,12 @@ if st.button("Run Genetic Programming"):
         population = new_population
 
     st.subheader("Fitness Convergence")
-    fig, ax = plt.subplots()
-    ax.plot(range(1, GENERATIONS+1), best_history, marker='o')
-    ax.set_title("Fitness Convergence")
-    ax.set_xlabel("Generation")       # Label paksi X
-    ax.set_ylabel("Best Fitness")     # Label paksi Y
-    ax.grid(True)
+      fig, ax = plt.subplots()
+      ax.plot(range(1, GENERATIONS+1), best_history, marker='o')
+      ax.set_title("Fitness Convergence")
+      ax.set_xlabel("Generation")       # Label paksi X
+      ax.set_ylabel("Best Fitness")     # Label paksi Y
+      ax.grid(True)
 
     st.pyplot(fig)
 
