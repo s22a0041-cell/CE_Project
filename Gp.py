@@ -3,7 +3,7 @@ import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from graphviz import Digraph  # <--- import graphviz
+from graphviz import Digraph
 
 # -------------------------------------------------
 # STREAMLIT CONFIG
@@ -24,7 +24,7 @@ st.sidebar.header("Genetic Programming Parameters")
 POP_SIZE = st.sidebar.slider("Population Size", 20, 200, 50)
 GENERATIONS = st.sidebar.slider("Generations", 10, 100, 30)
 CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.0, 1.0, 0.8)
-MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 0.5, 0.2)  # <--- max 0.5
+MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 0.5, 0.2)
 
 OBJECTIVE_TYPE = st.sidebar.radio(
     "Objective Type",
@@ -32,11 +32,14 @@ OBJECTIVE_TYPE = st.sidebar.radio(
 )
 
 if OBJECTIVE_TYPE == "Multi-Objective":
-    w_makespan = st.sidebar.slider("Weight for Makespan", 0.0, 1.0, 0.5)
-    w_idle = 1 - w_makespan
+    st.sidebar.write("Set weights for multi-objective fitness (sum <= 1)")
+    w_makespan = st.sidebar.slider("Weight: Makespan", 0.0, 1.0, 0.4)
+    w_idle = st.sidebar.slider("Weight: Machine Idle Time", 0.0, 1.0, 0.3)
+    w_wait = st.sidebar.slider("Weight: Job Waiting Time", 0.0, 1.0, 0.3)
 else:
     w_makespan = 1.0
     w_idle = 0.1
+    w_wait = 0.0  # hanya untuk single-objective
 
 # -------------------------------------------------
 # CSV UPLOAD
@@ -90,7 +93,7 @@ def eval_rule(expr, p, r):
         return 1e9
 
 # -------------------------------------------------
-# JOB SHOP SIMULATION
+# JOB SHOP SIMULATION (tambah job waiting time)
 # -------------------------------------------------
 def simulate(rule_expr):
     machine_time = [0] * NUM_MACHINES
@@ -98,6 +101,7 @@ def simulate(rule_expr):
     completed = [False] * NUM_JOBS
     remaining_ops = [NUM_MACHINES] * NUM_JOBS
     completion_times = []
+    waiting_time = [0] * NUM_JOBS
 
     while not all(completed):
         available_jobs = [j for j in range(NUM_JOBS) if not completed[j]]
@@ -113,6 +117,7 @@ def simulate(rule_expr):
 
         for m in range(NUM_MACHINES):
             start = max(machine_time[m], job_time[job])
+            waiting_time[job] += start - job_time[job]  # job menunggu di mesin
             finish = start + processing[job][m]
             machine_time[m] = finish
             job_time[job] = finish
@@ -123,7 +128,10 @@ def simulate(rule_expr):
 
     makespan = max(completion_times)
     idle_time = sum(machine_time) - makespan
-    fitness_value = w_makespan * makespan + w_idle * idle_time
+    total_waiting_time = sum(waiting_time)
+
+    # fitness weighted sum untuk multi-objective
+    fitness_value = w_makespan * makespan + w_idle * idle_time + w_wait * total_waiting_time
     return fitness_value
 
 # -------------------------------------------------
@@ -232,5 +240,5 @@ if st.button("Run Genetic Programming"):
     # -------------------------------------------------
     # DISPLAY FINAL FITNESS
     # -------------------------------------------------
-    st.subheader("Final Fitness Value (Makespan-based)")
+    st.subheader("Final Fitness Value (Weighted Multi-Objective)")
     st.write(best_history[-1])
