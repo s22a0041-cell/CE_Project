@@ -1,165 +1,167 @@
 import streamlit as st
 import random
 import operator
-import math
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
-# ==========================
-# DATA
-# ==========================
-jobs = ["J1", "J2", "J3", "J4", "J5"]
+from deap import base, creator, gp, tools, algorithms
 
-processing_time = {
-    "J1": [1,12,19,11,15,14,17,1,12,13],
-    "J2": [2,19,11,5,12,17,11,1,19,14],
-    "J3": [16,16,6,19,7,2,11,15,14,5],
-    "J4": [6,15,15,13,19,9,9,10,12,10],
-    "J5": [3,13,10,15,9,9,10,17,6,14]
-}
+# -----------------------------
+# STREAMLIT CONFIG
+# -----------------------------
+st.set_page_config(
+    page_title="GP Job Scheduling Optimization",
+    layout="wide"
+)
 
-# ==========================
-# JOB FEATURES
-# ==========================
-job_features = {}
-for j in jobs:
-    times = processing_time[j]
-    job_features[j] = {
-        "total": sum(times),
-        "max": max(times),
-        "min": min(times)
-    }
+st.title("Multi-objective Job Scheduling using Genetic Programming")
+st.write("Genetic Programming to evolve scheduling rules for limited machines")
 
-# ==========================
-# MAKESPAN
-# ==========================
-def makespan(sequence):
-    machines = len(processing_time["J1"])
-    machine_time = [0]*machines
+# -----------------------------
+# SIDEBAR INPUT
+# -----------------------------
+st.sidebar.header("Simulation Parameters")
 
-    for job in sequence:
-        for m in range(machines):
-            machine_time[m] = max(
-                machine_time[m],
-                machine_time[m-1] if m > 0 else 0
-            ) + processing_time[job][m]
-    return machine_time[-1]
+NUM_JOBS = st.sidebar.slider("Number of Jobs", 3, 10, 5)
+NUM_MACHINES = st.sidebar.slider("Number of Machines", 1, 3, 2)
+POP_SIZE = st.sidebar.slider("Population Size", 50, 300, 100)
+GENS = st.sidebar.slider("Generations", 10, 100, 30)
 
-# ==========================
-# GP FUNCTION SET
-# ==========================
-def protected_div(a, b):
-    return a / b if abs(b) > 0.001 else a
+random.seed(42)
 
-FUNCTIONS = [
-    ("+", operator.add),
-    ("-", operator.sub),
-    ("*", operator.mul),
-    ("/", protected_div)
-]
+# -----------------------------
+# JOB DATA
+# -----------------------------
+jobs = []
+for j in range(NUM_JOBS):
+    jobs.append({
+        "job_id": f"J{j+1}",
+        "processing_time": random.randint(1, 10),
+        "release_time": random.randint(0, 5)
+    })
 
-TERMINALS = ["total", "max", "min"]
+jobs_df = pd.DataFrame(jobs)
 
-# ==========================
-# RANDOM EXPRESSION TREE
-# ==========================
-def random_tree(depth):
-    if depth == 0 or random.random() < 0.3:
-        if random.random() < 0.7:
-            return random.choice(TERMINALS)
-        else:
-            return random.uniform(0.1, 10)
-    func = random.choice(FUNCTIONS)
-    return (func, random_tree(depth-1), random_tree(depth-1))
+st.subheader("Job Data")
+st.dataframe(jobs_df, use_container_width=True)
 
-# ==========================
-# TREE EVALUATION
-# ==========================
-def eval_tree(tree, features):
-    if isinstance(tree, (int, float)):
-        return tree
-    if isinstance(tree, str):
-        return features[tree]
-    func, left, right = tree
-    return func[1](eval_tree(left, features), eval_tree(right, features))
+# -----------------------------
+# GP PRIMITIVES
+# -----------------------------
+pset = gp.PrimitiveSet("MAIN", 2)
+pset.renameArguments(ARG0="p_time", ARG1="wait_time")
 
-# ==========================
+pset.addPrimitive(operator.add, 2)
+pset.addPrimitive(operator.sub, 2)
+pset.addPrimitive(operator.mul, 2)
+pset.addPrimitive(max, 2)
+pset.addPrimitive(min, 2)
+
+pset.addEphemeralConstant("rand", lambda: random.uniform(-1, 1))
+
+# -----------------------------
+# FITNESS & INDIVIDUAL
+# -----------------------------
+creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
+
+toolbox = base.Toolbox()
+toolbox.register("expr", gp.genHalfAndHalf, pset=pset, min_=1, max_=3)
+toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.expr)
+toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+toolbox.register("compile", gp.compile, pset=pset)
+
+# -----------------------------
+# SCHEDULING SIMULATION
+# -----------------------------
+def simulate_schedule(rule_func):
+    time = 0
+    machine_available = [0] * NUM_MACHINES
+    completion_times = []
+
+    job_queue = jobs.copy()
+
+    while job_queue:
+        available_jobs = [j for j in job_queue if j["release_time"] <= time]
+
+        if not available_jobs:
+            time += 1
+            continue
+
+        scored_jobs = []
+        for job in available_jobs:
+            wait_time = time - job["release_time"]
+            score = rule_func(job["processing_time"], wait_time)
+            scored_jobs.append((score, job))
+
+        scored_jobs.sort(key=lambda x: x[0])
+        selected_job = scored_jobs[0][1]
+
+        machine_index = machine_available.index(min(machine_available))
+        start_time = max(time, machine_available[machine_index])
+        finish_time = start_time + selected_job["processing_time"]
+
+        machine_available[machine_index] = finish_time
+        completion_times.append(finish_time)
+
+        job_queue.remove(selected_job)
+        time += 1
+
+    makespan = max(completion_times)
+    total_waiting = sum(completion_times)
+    idle_time = sum(machine_available) - makespan
+
+    return makespan + 0.1 * total_waiting + 0.1 * idle_time
+
+# -----------------------------
 # FITNESS FUNCTION
-# ==========================
-def fitness(tree):
-    priorities = {}
-    for j in jobs:
-        priorities[j] = eval_tree(tree, job_features[j])
-    sequence = sorted(jobs, key=lambda x: priorities[x])
-    return makespan(sequence)
+# -----------------------------
+def eval_individual(individual):
+    func = toolbox.compile(expr=individual)
+    fitness = simulate_schedule(func)
+    return (fitness,)
 
-# ==========================
-# GP OPERATORS
-# ==========================
-def tournament(pop, k=3):
-    return min(random.sample(pop, k), key=fitness)
+toolbox.register("evaluate", eval_individual)
+toolbox.register("select", tools.selTournament, tournsize=3)
+toolbox.register("mate", gp.cxOnePoint)
+toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
 
-def crossover(t1, t2):
-    if random.random() < 0.5:
-        return t1
-    if isinstance(t1, tuple) and isinstance(t2, tuple):
-        return (t1[0], crossover(t1[1], t2[1]), crossover(t1[2], t2[2]))
-    return t2
+toolbox.decorate("mate", gp.staticLimit(key=len, max_value=10))
+toolbox.decorate("mutate", gp.staticLimit(key=len, max_value=10))
 
-def mutation(tree, depth):
-    if random.random() < 0.1:
-        return random_tree(depth)
-    if isinstance(tree, tuple):
-        return (tree[0], mutation(tree[1], depth-1), mutation(tree[2], depth-1))
-    return tree
+# -----------------------------
+# RUN GP
+# -----------------------------
+if st.button("Run Genetic Programming"):
+    pop = toolbox.population(n=POP_SIZE)
+    hof = tools.HallOfFame(1)
+    stats = tools.Statistics(lambda ind: ind.fitness.values)
+    stats.register("avg", np.mean)
+    stats.register("min", np.min)
 
-# ==========================
-# GP MAIN
-# ==========================
-def genetic_programming(pop_size, generations, depth):
-    population = [random_tree(depth) for _ in range(pop_size)]
-    history = []
+    pop, result_log = algorithms.eaSimple(
+        pop, toolbox,
+        cxpb=0.5,
+        mutpb=0.2,
+        ngen=GENS,
+        stats=stats,
+        halloffame=hof,
+        verbose=False
+    )
 
-    best = min(population, key=fitness)
+    log_df = pd.DataFrame(result_log)
+    st.subheader("Convergence Graph")
 
-    for _ in range(generations):
-        new_pop = []
-        for _ in range(pop_size):
-            p1 = tournament(population)
-            p2 = tournament(population)
-            child = crossover(p1, p2)
-            child = mutation(child, depth)
-            new_pop.append(child)
+    fig, ax = plt.subplots()
+    ax.plot(log_df["gen"], log_df["min"], label="Best Fitness")
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Fitness")
+    ax.legend()
+    st.pyplot(fig, use_container_width=True)
 
-        population = new_pop
-        current_best = min(population, key=fitness)
-        if fitness(current_best) < fitness(best):
-            best = current_best
+    st.subheader("Best Scheduling Rule (GP Tree)")
+    st.code(str(hof[0]), language="text")
 
-        history.append(fitness(best))
-
-    return best, fitness(best), history
-
-# ==========================
-# STREAMLIT UI
-# ==========================
-st.title("Genetic Programming for Job Scheduling")
-
-pop = st.sidebar.slider("Population Size", 10, 100, 30)
-gen = st.sidebar.slider("Generations", 10, 200, 80)
-depth = st.sidebar.slider("Tree Depth", 2, 6, 4)
-
-if st.button("Run GP"):
-    best_tree, best_fit, history = genetic_programming(pop, gen, depth)
-
-    st.subheader("Best Evolved Program (Tree)")
-    st.write(best_tree)
-
-    st.subheader("Best Makespan")
-    st.success(best_fit)
-
-    st.subheader("Convergence Curve")
-    plt.figure()
-    plt.plot(history)
-    plt.xlabel("Generation")
-    plt.ylabel("Best Makespan")
-    st.pyplot(plt)
+    st.subheader("Best Fitness Value")
+    st.write(hof[0].fitness.values[0])
