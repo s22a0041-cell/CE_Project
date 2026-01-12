@@ -12,39 +12,43 @@ st.set_page_config(
 )
 
 st.title("Job Scheduling using Genetic Programming")
-st.write("Genetic Programming to evolve scheduling rules on limited machines")
+st.write("Genetic Programming to evolve scheduling rules using uploaded CSV data")
 
 # -------------------------------------------------
 # SIDEBAR PARAMETERS
 # -------------------------------------------------
 st.sidebar.header("Simulation Parameters")
 
-NUM_JOBS = st.sidebar.slider("Number of Jobs", 3, 10, 5)
 NUM_MACHINES = st.sidebar.slider("Number of Machines", 1, 3, 2)
 POP_SIZE = st.sidebar.slider("Population Size", 20, 200, 50)
 GENERATIONS = st.sidebar.slider("Generations", 10, 100, 30)
 MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.2)
 
-random.seed(42)
-
 # -------------------------------------------------
-# JOB DATA
+# CSV UPLOAD
 # -------------------------------------------------
-jobs = []
-for i in range(NUM_JOBS):
-    jobs.append({
-        "job": f"J{i+1}",
-        "processing": random.randint(1, 10),
-        "release": random.randint(0, 5)
-    })
+st.subheader("Upload Job Dataset (CSV)")
+uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
-jobs_df = pd.DataFrame(jobs)
+if uploaded_file is None:
+    st.info("Please upload a CSV file to start the simulation.")
+    st.stop()
 
-st.subheader("Job Data")
+jobs_df = pd.read_csv(uploaded_file)
+
+required_cols = {"job_id", "processing_time", "release_time"}
+if not required_cols.issubset(jobs_df.columns):
+    st.error("CSV must contain columns: job_id, processing_time, release_time")
+    st.stop()
+
+st.subheader("Uploaded Job Data")
 st.dataframe(jobs_df, use_container_width=True)
 
+jobs = jobs_df.to_dict(orient="records")
+
 # -------------------------------------------------
-# GP REPRESENTATION (RULE TREE AS EXPRESSION STRING)
+# GP REPRESENTATION (RULE AS EXPRESSION STRING)
+# p = processing_time, w = waiting_time
 # -------------------------------------------------
 OPERATORS = ["+", "-", "*"]
 TERMINALS = ["p", "w", "1", "2"]
@@ -70,28 +74,33 @@ def simulate(rule_expr):
     job_queue = jobs.copy()
 
     while job_queue:
-        available = [j for j in job_queue if j["release"] <= time]
+        available_jobs = [j for j in job_queue if j["release_time"] <= time]
 
-        if not available:
+        if not available_jobs:
             time += 1
             continue
 
         scores = []
-        for j in available:
-            wait = time - j["release"]
-            score = evaluate_expression(rule_expr, j["processing"], wait)
-            scores.append((score, j))
+        for job in available_jobs:
+            waiting = time - job["release_time"]
+            score = evaluate_expression(
+                rule_expr,
+                job["processing_time"],
+                waiting
+            )
+            scores.append((score, job))
 
         scores.sort(key=lambda x: x[0])
-        selected = scores[0][1]
+        selected_job = scores[0][1]
 
-        m = machines.index(min(machines))
-        start = max(time, machines[m])
-        finish = start + selected["processing"]
+        m_idx = machines.index(min(machines))
+        start_time = max(time, machines[m_idx])
+        finish_time = start_time + selected_job["processing_time"]
 
-        machines[m] = finish
-        completion_times.append(finish)
-        job_queue.remove(selected)
+        machines[m_idx] = finish_time
+        completion_times.append(finish_time)
+
+        job_queue.remove(selected_job)
         time += 1
 
     makespan = max(completion_times)
@@ -104,18 +113,18 @@ def simulate(rule_expr):
 # -------------------------------------------------
 # GENETIC OPERATORS
 # -------------------------------------------------
-def crossover(p1, p2):
-    cut1 = random.randint(1, len(p1)-2)
-    cut2 = random.randint(1, len(p2)-2)
-    return p1[:cut1] + p2[cut2:]
+def crossover(parent1, parent2):
+    cut1 = random.randint(1, len(parent1) - 2)
+    cut2 = random.randint(1, len(parent2) - 2)
+    return parent1[:cut1] + parent2[cut2:]
 
 def mutate(expr):
     if random.random() < MUTATION_RATE:
         return random_expression(2)
     return expr
 
-def tournament_selection(pop, fitness, k=3):
-    selected = random.sample(list(zip(pop, fitness)), k)
+def tournament_selection(population, fitness, k=3):
+    selected = random.sample(list(zip(population, fitness)), k)
     selected.sort(key=lambda x: x[1])
     return selected[0][0]
 
@@ -124,34 +133,37 @@ def tournament_selection(pop, fitness, k=3):
 # -------------------------------------------------
 if st.button("Run Genetic Programming"):
     population = [random_expression(2) for _ in range(POP_SIZE)]
-    best_fitness = []
+    best_fitness_history = []
     best_rule = None
 
     for gen in range(GENERATIONS):
         fitness_values = [simulate(ind) for ind in population]
-        best_idx = np.argmin(fitness_values)
+        best_idx = int(np.argmin(fitness_values))
 
-        best_fitness.append(fitness_values[best_idx])
+        best_fitness_history.append(fitness_values[best_idx])
         best_rule = population[best_idx]
 
         new_population = []
         for _ in range(POP_SIZE):
-            parent1 = tournament_selection(population, fitness_values)
-            parent2 = tournament_selection(population, fitness_values)
-            child = crossover(parent1, parent2)
+            p1 = tournament_selection(population, fitness_values)
+            p2 = tournament_selection(population, fitness_values)
+            child = crossover(p1, p2)
             child = mutate(child)
             new_population.append(child)
 
         population = new_population
 
+    # -------------------------------------------------
+    # OUTPUT
+    # -------------------------------------------------
     st.subheader("Fitness Convergence")
     st.line_chart(
-        pd.DataFrame({"Fitness": best_fitness}),
+        pd.DataFrame({"Best Fitness": best_fitness_history}),
         use_container_width=True
     )
 
-    st.subheader("Best Scheduling Rule (Evolved)")
+    st.subheader("Best Evolved Scheduling Rule")
     st.code(best_rule, language="text")
 
     st.subheader("Best Fitness Value")
-    st.write(best_fitness[-1])
+    st.write(best_fitness_history[-1])
