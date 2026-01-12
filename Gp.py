@@ -24,7 +24,7 @@ st.sidebar.header("Genetic Programming Parameters")
 POP_SIZE = st.sidebar.slider("Population Size", 20, 200, 50)
 GENERATIONS = st.sidebar.slider("Generations", 10, 100, 30)
 CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.0, 1.0, 0.8)
-MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.2)
+MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 0.5, 0.2)  # <--- max 0.5
 
 OBJECTIVE_TYPE = st.sidebar.radio(
     "Objective Type",
