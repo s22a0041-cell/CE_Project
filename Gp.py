@@ -3,6 +3,7 @@ import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from graphviz import Digraph
 
 # -------------------------------------------------
 # STREAMLIT CONFIG
@@ -25,7 +26,7 @@ GENERATIONS = st.sidebar.slider("Generations", 10, 100, 30)
 CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.0, 1.0, 0.8)
 MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.2)
 
-# Tambah pilihan single-objective / multi-objective
+# Single / Multi Objective
 OBJECTIVE_TYPE = st.sidebar.radio(
     "Objective Type",
     options=["Single-Objective", "Multi-Objective"]
@@ -36,8 +37,7 @@ if OBJECTIVE_TYPE == "Multi-Objective":
     w_idle = 1 - w_makespan
 else:
     w_makespan = 1.0
-    w_idle = 0.1  # sedia ada weighting
-
+    w_idle = 0.1  # default weighting
 
 # -------------------------------------------------
 # CSV UPLOAD
@@ -50,7 +50,6 @@ if uploaded_file is None:
     st.stop()
 
 df = pd.read_csv(uploaded_file)
-
 job_col = df.columns[0]
 machine_cols = df.columns[1:]
 
@@ -85,15 +84,9 @@ def random_expression(depth=2):
 def eval_rule(expr, p, r):
     try:
         value = eval(expr, {"p": p, "r": r})
-
-        if isinstance(value, complex):
+        if isinstance(value, complex) or not np.isfinite(value):
             return 1e9
-
-        if not np.isfinite(value):
-            return 1e9
-
         return float(value)
-
     except:
         return 1e9
 
@@ -118,7 +111,6 @@ def simulate(rule_expr):
 
         scores = [(s, j) for s, j in scores if np.isfinite(s)]
         scores.sort(key=lambda x: x[0])
-
         job = scores[0][1]
 
         for m in range(NUM_MACHINES):
@@ -134,7 +126,6 @@ def simulate(rule_expr):
     makespan = max(completion_times)
     idle_time = sum(machine_time) - makespan
 
-    # Gabungkan untuk single atau multi-objective
     fitness_value = w_makespan * makespan + w_idle * idle_time
     return fitness_value
 
@@ -142,8 +133,8 @@ def simulate(rule_expr):
 # GENETIC OPERATORS
 # -------------------------------------------------
 def crossover(p1, p2):
-    c1 = random.randint(1, len(p1) - 2)
-    c2 = random.randint(1, len(p2) - 2)
+    c1 = random.randint(1, len(p1)-2)
+    c2 = random.randint(1, len(p2)-2)
     return p1[:c1] + p2[c2:]
 
 def mutate(expr):
@@ -157,6 +148,43 @@ def tournament(pop, fitness, k=3):
     return chosen[0][0]
 
 # -------------------------------------------------
+# EXPRESSION TO TREE VISUALIZATION
+# -------------------------------------------------
+def expr_to_tree(expr):
+    count = 0
+    g = Digraph(format='png')
+
+    def add_node(e):
+        nonlocal count
+        node_id = f"n{count}"
+        count += 1
+
+        e = e.strip()
+        if e.startswith("(") and e.endswith(")"):
+            level = 0
+            for i, c in enumerate(e[1:-1], start=1):
+                if c == "(":
+                    level += 1
+                elif c == ")":
+                    level -= 1
+                elif c in "+-*":
+                    if level == 0:
+                        op = c
+                        left = e[1:i]
+                        right = e[i+1:-1]
+                        g.node(node_id, op)
+                        left_id = add_node(left)
+                        right_id = add_node(right)
+                        g.edge(node_id, left_id)
+                        g.edge(node_id, right_id)
+                        return node_id
+        g.node(node_id, e)
+        return node_id
+
+    add_node(expr)
+    return g
+
+# -------------------------------------------------
 # RUN GP
 # -------------------------------------------------
 if st.button("Run Genetic Programming"):
@@ -167,7 +195,6 @@ if st.button("Run Genetic Programming"):
     for g in range(GENERATIONS):
         fitness = [simulate(ind) for ind in population]
         best_idx = int(np.argmin(fitness))
-
         best_history.append(fitness[best_idx])
         best_rule = population[best_idx]
 
@@ -175,19 +202,16 @@ if st.button("Run Genetic Programming"):
         for _ in range(POP_SIZE):
             p1 = tournament(population, fitness)
             p2 = tournament(population, fitness)
-
             if random.random() < CROSSOVER_RATE:
                 child = crossover(p1, p2)
             else:
                 child = p1
-
             child = mutate(child)
             new_population.append(child)
-
         population = new_population
 
     # -------------------------------------------------
-    # PLOT FITNESS CONVERGENCE WITH LABELS
+    # PLOT FITNESS CONVERGENCE
     # -------------------------------------------------
     fig, ax = plt.subplots()
     ax.plot(range(1, GENERATIONS+1), best_history, marker='o')
@@ -195,7 +219,6 @@ if st.button("Run Genetic Programming"):
     ax.set_xlabel("Generation")
     ax.set_ylabel("Best Fitness")
     ax.grid(True)
-
     st.pyplot(fig)
 
     # -------------------------------------------------
@@ -204,5 +227,15 @@ if st.button("Run Genetic Programming"):
     st.subheader("Best Evolved Priority Rule")
     st.code(best_rule, language="text")
 
+    # -------------------------------------------------
+    # DISPLAY TREE
+    # -------------------------------------------------
+    st.subheader("Best Priority Rule Tree")
+    tree_graph = expr_to_tree(best_rule)
+    st.graphviz_chart(tree_graph)
+
+    # -------------------------------------------------
+    # DISPLAY FINAL FITNESS
+    # -------------------------------------------------
     st.subheader("Final Fitness Value (Makespan-based)")
     st.write(best_history[-1])
