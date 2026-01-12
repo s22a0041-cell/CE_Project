@@ -2,6 +2,7 @@ import streamlit as st
 import random
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # -------------------------------------------------
 # STREAMLIT CONFIG
@@ -169,22 +170,23 @@ if st.button("Run Genetic Programming"):
 
         population = new_population
 
-    st.subheader("Fitness Convergence")
-      fig, ax = plt.subplots()
-      ax.plot(range(1, GENERATIONS+1), best_history, marker='o')
-      ax.set_title("Fitness Convergence")
-      ax.set_xlabel("Generation")       # Label paksi X
-      ax.set_ylabel("Best Fitness")     # Label paksi Y
-      ax.grid(True)
+    # -------------------------------------------------
+    # PLOT FITNESS CONVERGENCE WITH LABELS
+    # -------------------------------------------------
+    fig, ax = plt.subplots()
+    ax.plot(range(1, GENERATIONS+1), best_history, marker='o')
+    ax.set_title("Fitness Convergence")
+    ax.set_xlabel("Generation")       # Label paksi X
+    ax.set_ylabel("Best Fitness")     # Label paksi Y
+    ax.grid(True)
 
     st.pyplot(fig)
 
+    # -------------------------------------------------
+    # DISPLAY BEST RULE
+    # -------------------------------------------------
     st.subheader("Best Evolved Priority Rule")
     st.code(best_rule, language="text")
 
     st.subheader("Final Fitness Value (Makespan-based)")
     st.write(best_history[-1])
-
-
-
-
