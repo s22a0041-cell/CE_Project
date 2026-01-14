@@ -5,9 +5,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from graphviz import Digraph
 
-# -------------------------------------------------
+
 # STREAMLIT CONFIG
-# -------------------------------------------------
 st.set_page_config(
     page_title="GP Job Shop Scheduling",
     layout="wide"
@@ -16,9 +15,7 @@ st.set_page_config(
 st.title("Job Shop Scheduling using Genetic Programming")
 st.write("CSV format: Job × Machine processing time matrix")
 
-# -------------------------------------------------
 # SIDEBAR PARAMETERS
-# -------------------------------------------------
 st.sidebar.header("Genetic Programming Parameters")
 
 POP_SIZE = st.sidebar.slider("Population Size", 20, 200, 50)
@@ -41,9 +38,7 @@ else:
     w_idle = 0.1
     w_wait = 0.0  # hanya untuk single-objective
 
-# -------------------------------------------------
 # CSV UPLOAD
-# -------------------------------------------------
 st.subheader("Upload Job Shop CSV")
 uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
@@ -72,9 +67,7 @@ processing = df[machine_cols].to_numpy()
 NUM_JOBS = len(jobs)
 NUM_MACHINES = len(machine_cols)
 
-# -------------------------------------------------
 # GP REPRESENTATION
-# -------------------------------------------------
 OPERATORS = ["+", "-", "*"]
 TERMINALS = ["p", "r", "1", "2"]
 
@@ -92,9 +85,7 @@ def eval_rule(expr, p, r):
     except:
         return 1e9
 
-# -------------------------------------------------
 # JOB SHOP SIMULATION (tambah job waiting time)
-# -------------------------------------------------
 def simulate(rule_expr):
     machine_time = [0] * NUM_MACHINES
     job_time = [0] * NUM_JOBS
@@ -134,9 +125,7 @@ def simulate(rule_expr):
     fitness_value = w_makespan * makespan + w_idle * idle_time + w_wait * total_waiting_time
     return fitness_value
 
-# -------------------------------------------------
 # GENETIC OPERATORS
-# -------------------------------------------------
 def crossover(p1, p2):
     c1 = random.randint(1, len(p1)-2)
     c2 = random.randint(1, len(p2)-2)
@@ -152,9 +141,7 @@ def tournament(pop, fitness, k=3):
     chosen.sort(key=lambda x: x[1])
     return chosen[0][0]
 
-# -------------------------------------------------
 # FUNCTION TO VISUALIZE TREE
-# -------------------------------------------------
 def expr_to_tree(expr):
     count = 0
     g = Digraph(format='png')
@@ -187,9 +174,7 @@ def expr_to_tree(expr):
     add_node(expr)
     return g
 
-# -------------------------------------------------
 # RUN GP
-# -------------------------------------------------
 if st.button("Run Genetic Programming"):
     population = [random_expression(2) for _ in range(POP_SIZE)]
     best_history = []
@@ -213,9 +198,7 @@ if st.button("Run Genetic Programming"):
             new_population.append(child)
         population = new_population
 
-    # -------------------------------------------------
     # PLOT FITNESS CONVERGENCE
-    # -------------------------------------------------
     fig, ax = plt.subplots()
     ax.plot(range(1, GENERATIONS+1), best_history, marker='o')
     ax.set_title(f"Fitness Convergence ({OBJECTIVE_TYPE})")
@@ -224,21 +207,21 @@ if st.button("Run Genetic Programming"):
     ax.grid(True)
     st.pyplot(fig)
 
-    # -------------------------------------------------
+  
     # DISPLAY BEST RULE
-    # -------------------------------------------------
+  
     st.subheader("Best Evolved Priority Rule")
     st.code(best_rule, language="text")
 
-    # -------------------------------------------------
+  
     # DISPLAY TREE VISUALIZATION
-    # -------------------------------------------------
+  
     st.subheader("Best Priority Rule Tree")
     tree_graph = expr_to_tree(best_rule)
     st.graphviz_chart(tree_graph)
 
-    # -------------------------------------------------
+  
     # DISPLAY FINAL FITNESS
-    # -------------------------------------------------
+  
     st.subheader("Final Fitness Value (Weighted Multi-Objective)")
     st.write(best_history[-1])
